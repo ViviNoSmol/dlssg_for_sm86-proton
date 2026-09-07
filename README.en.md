@@ -1,46 +1,45 @@
-# DLSSG For RTX30XX GPU
-
+# DLSSG SM86
 
 [简体中文](README.md) | English
 
-A Windows x64 / D3D12 DLSSG package with an SM86 backend. Each proxy DLL embeds the matching original DLSSG 310.1 runtime, its models and processing pipeline, and the SM86 backend. The default `Mode=Bundled` uses this embedded pair, so backend matching does not depend on the game's own DLSSG version.
+**Copy `version.dll` and `dlssg_sm86.ini` beside the game's actual rendering executable, then launch the game normally.** No Python or PowerShell launcher is required at runtime.
 
-The project contains the source code, third-party headers and libraries, runtime, and GPU resources required to build it. It can be copied to another location without the original research workspace, a game installation, or an existing CMake cache.
+The current Release (September 7, 2026) is the first milestone. The proxy embeds the matching original DLSSG 310.1 runtime, including its models and pipeline, and the SM86 backend. The default `Mode=Bundled` redirects DLSSG requests to this embedded implementation, regardless of the game's own DLSSG version.
 
-## Current release
+On first use, the proxy extracts the matching files to `%LOCALAPPDATA%\DlssgSm86\bundles\<bundle-id>`, verifies their hashes, and loads them. Later launches reuse the cache; damaged cached files are restored automatically.
 
-**Release, September 7, 2026** is the first milestone. Hardware validation was performed on an **NVIDIA GeForce RTX 3080 Ti, 12 GiB, physical SM86**, with driver **591.86**.
+## Configuration file
 
-| User-reported gameplay results | Frame generation off | 2X | 4X |
-|---|---:|---:|---:|
-| Black Myth: Wukong | 50 FPS | 80 FPS | 150 FPS |
-| Cyberpunk 2077, path tracing | 35 FPS | 60 FPS | 100 FPS |
+The INI must be named `dlssg_sm86.ini` and placed beside the active `version.dll` or `winmm.dll`. **Fully exit and restart the game after changing it.** Settings are not reloaded while the process is running.
 
-These are approximate FPS observations from manual gameplay. The tester described the current experience as relatively stable. They are not standardized average FPS, percentile FPS, latency, or long-duration stability measurements. In-game 2X / 4X settings do not guarantee the same multiplier over the measured frame rate with frame generation off.
+- Use `0` or `1` for Boolean settings. Lines starting with `;` are comments.
+- `Mode` and `KernelImage` values are case-insensitive.
+- Log directories, cache directories, and DLL paths may be absolute or relative to the proxy DLL / INI directory.
+- Custom paths do not expand variables such as `%LOCALAPPDATA%` or `%TEMP%`. Enter the actual path, or leave `CacheDirectory` empty to use the default cache location.
+- For normal use, keep `Mode=Bundled` and both compatibility switches at `0`.
+- Update the proxy DLL and INI together when adopting new options.
 
-The release directory is `dist/Release/`. The deployment archive is `dist/dlssg-release-x64.zip`, and the source archive is `dist/dlssg-source.zip`; both have SHA256 sidecars. Deployment and source packages exclude raw evidence, logs, screenshots, and captures. Those remain in the development workspace.
-
-Both games use the same tested proxy. Their test conditions, results, and limitations are recorded in the [validation document](docs/VALIDATION.md) (Chinese).
-
-## Installation
-
-1. Exit the game completely.
-2. Copy `version.dll` and `dlssg_sm86.ini` from the release directory beside the game's actual rendering executable.
-3. Start the game normally.
-
-If the game does not import `version.dll`, use `alternatives/winmm.dll` instead. Enable only one proxy. An existing mod with the same DLL name requires resolving the entry-point conflict; arbitrary proxy chaining is not implemented.
-
-Key defaults in the supplied INI are:
+## Complete default configuration
 
 ```ini
+[General]
+Enabled=1
+
 [FrameGeneration]
 MaxGeneratedFrames=3
 
 [Logging]
 Level=2
+File=1
+DebugOutput=0
+EvaluateEvery=120
+Directory=dlssg_sm86\logs
 
 [Debug]
 MarkGeneratedFrames=0
+MarkerX=8
+MarkerY=8
+MarkerScale=2
 
 [Compatibility]
 KernelImage=Auto
@@ -49,57 +48,102 @@ SimulateAmpere=0
 
 [Runtime]
 Mode=Bundled
+CacheDirectory=
+Path=
+
+[Backends]
 ```
 
-`MaxGeneratedFrames=3` advertises a maximum of three additional generated frames, corresponding to 4X mode. The game chooses the actual count; the setting does not independently add menu options or force 4X presentation. `1` allows up to 2X, `2` up to 3X, and `0` preserves the runtime capability.
+### [General]
 
-The proxy extracts and verifies its embedded runtime and backend under `%LOCALAPPDATA%\DlssgSm86\bundles\<bundle-id>`. Subsequent launches reuse the cache. No Python or PowerShell launcher is needed to run the game.
+| Option | Default | Behavior |
+|---|---|---|
+| `Enabled` | `1` | Enables DLSSG redirection, adaptation, capability reporting, and optional markers. `0` preserves the game's original DLSSG loading behavior. The proxy still forwards the system DLL's original exports. |
 
-Restart the game after changing the INI. To uninstall, exit the game and remove the added proxy and INI. See the [installation and configuration guide](docs/INSTALL.md) (Chinese) for all options.
+### [FrameGeneration]
 
-## Building
+| Option | Default | Behavior |
+|---|---|---|
+| `MaxGeneratedFrames` | `3` | Maximum additional generated frames advertised to the game. `0` preserves the runtime capability; `1` allows up to 2X, `2` up to 3X, and `3` up to 4X. |
 
-Install Visual Studio or Build Tools with **Desktop development with C++**, the Windows SDK, and **C++ CMake tools for Windows**. The project requires MSVC, an x64 target, C++20, and CMake 3.22 or later.
+**The game chooses the actual generated-frame count.** This setting does not independently add menu options or force 4X presentation. The backend limit is three additional frames. Accepted INI values from 4 to 16 are clamped to 3; values above 16 or invalid numbers cause configuration parsing to fail. Use 0–3 for normal operation.
 
-Run this from the project root in PowerShell:
+### [Compatibility]
 
-```powershell
-.\build.cmd
-```
+| Option | Default | Behavior |
+|---|---|---|
+| `KernelImage` | `Auto` | Selects `Auto`, `PTX`, or `Cubin`. An omitted setting also uses Auto. |
+| `ForceSM86Route` | `0` | `0` automatically enables the adaptation route on physical SM86. `1` allows forced SM86 routing on other GPUs for validation; architectures below SM86 are still rejected. |
+| `SimulateAmpere` | `0` | Adjusts the reported architecture for validation. Requires `ForceSM86Route=1`; it does not change the physical GPU. |
 
-The entry point calls `build.ps1`, discovers the Visual Studio installation and its CMake tools, builds the project, runs five basic CTest checks, and creates the deployment package. The tested build used MSVC 19.44, Windows SDK 10.0.26100.0, CMake 3.31.6, and Ninja Multi-Config.
-
-**A normal build and the five basic checks do not require Python, a GPU, or the CUDA Toolkit.** The build embeds the existing SM86 cubin/PTX resources in `assets/kernels`; it does not regenerate the kernels or models.
-
-| Output | Contents |
+| KernelImage | Behavior when the SM86 route is active |
 |---|---|
-| `dist/Release/version.dll` | Main proxy with embedded runtime and backend |
-| `dist/Release/alternatives/winmm.dll` | Alternative proxy |
-| `dist/Release/dlssg_sm86.ini` | User configuration |
-| `dist/Release/README.md` | Installation instructions |
-| `dist/Release/docs/VALIDATION.md` | Gameplay results and known issues |
-| `dist/Release/manifest.json` | File hashes, bundle identity, and validation status |
-| `dist/dlssg-release-x64.zip` | Deployment archive |
-| `dist/dlssg-release-x64.zip.sha256` | Archive checksum |
+| `Auto` | Uses the precompiled SM86 cubin on physical SM86; uses SM86 PTX on other GPUs. |
+| `PTX` | Uses SM86 PTX, which the driver JIT-compiles for the GPU. Also available on the RTX 3080 Ti. |
+| `Cubin` | Requires physical SM86 and uses the precompiled cubin. Incompatible hardware is rejected; the default Bundled mode attempts to fall back to the original load request. |
 
-A normal build records GPU validation as `performed=false`. Previous hardware results do not automatically apply to a newly compiled DLL.
+**KernelImage selects the kernel format; it does not independently enable routing.** The RTX 3080 Ti is detected as SM86 automatically. Keep both compatibility switches at `0` when using Auto, PTX, or Cubin on this card. Devices without an active SM86 route use the runtime's original kernels.
 
-Common build options:
+This option does not change model weights, FP16 precision mode, or the advertised frame count. PTX requires driver support for the supplied PTX version and may incur JIT compilation on first use.
 
-```powershell
-.\build.cmd -Configuration Debug
-.\build.cmd -Configuration RelWithDebInfo
-.\build.cmd -BuildDirectory "out\custom build"
-.\build.cmd -CMake "C:\path\to\cmake.exe" -Generator "Visual Studio 17 2022"
+### [Logging]
+
+| Option | Default | Behavior |
+|---|---|---|
+| `Level` | `2` | `0`: off; `1`: errors; `2`: adds configuration, loading, and capability information; `3`: adds kernel creation, Evaluate, and marker traces. |
+| `File` | `1` | Enables file logging, subject to Level. |
+| `DebugOutput` | `0` | Sends messages through Windows debug output for a debugger to receive. Does not display messages in the game. |
+| `EvaluateEvery` | `120` | Sampling interval for normal Evaluate / marker messages, counted in Evaluate calls. `1` logs every call, `0` is treated as 120, and the maximum is 1,000,000. |
+| `Directory` | `dlssg_sm86\logs` | Log directory; accepts another nonempty relative or absolute path. |
+
+Files are named `loader_<PID>.jsonl` and `backend_<PID>.jsonl`. At Level 3, the first 12 Evaluate calls are logged; later normal calls follow `EvaluateEvery`. Failures are still logged at the error level. Multiple generated frames can require multiple Evaluate calls, so this interval is not a count of displayed game frames.
+
+Level 2 is normally sufficient to confirm configuration and kernel selection. Level 3 produces more diagnostic output.
+
+### [Debug]
+
+| Option | Default | Behavior |
+|---|---|---|
+| `MarkGeneratedFrames` | `0` | `1` draws a marker such as `FG 1/3` on generated output. Real-frame and Reset outputs are skipped. |
+| `MarkerX` | `8` | Marker left edge in output-texture pixels, range 0–65535. |
+| `MarkerY` | `8` | Marker top edge in output-texture pixels, range 0–65535. |
+| `MarkerScale` | `2` | Scale from 1 to 8. The rectangle is `24 × scale` by `9 × scale` pixels, or 48×18 at the default scale. |
+
+The marker must fit completely inside the output texture. An out-of-bounds marker fails and logs `marker_failed`. Markers modify generated-frame pixels: disable them for full-image numerical comparisons, or compare outside the marker region separately.
+
+### [Runtime]
+
+| Option | Default | Behavior |
+|---|---|---|
+| `Mode` | `Bundled` | Selects `Bundled`, `Auto`, or `Pinned`. Runtime Auto is independent of KernelImage Auto. |
+| `CacheDirectory` | Empty | Uses `%LOCALAPPDATA%\DlssgSm86\bundles` when empty. A custom root receives a subdirectory for each bundle ID. |
+| `Path` | Empty | Used only in Pinned mode; specifies the original `nvngx_dlssg.dll` to load. |
+
+| Mode | Behavior |
+|---|---|
+| `Bundled` | Uses the embedded runtime and matching backend. Normal installations do not need Path or Backends entries. |
+| `Auto` | Uses the original runtime requested by the game. Known hashes can select a matching backend; other versions need a matching external backend or retain their original behavior. |
+| `Pinned` | Attempts to load Path with a matching backend. Missing or unsuitable files fall back to the original request; details are logged. |
+
+Bundled uses the package's fixed 310.1 models, rather than automatically adopting models from newer game DLLs. Cache extraction, runtime loading, or backend installation failures log `runtime_selection_failed` and attempt the original request. A successful fallback does not establish that SM86 routing is active.
+
+### [Backends]
+
+Leave this section empty for normal Bundled use. Advanced Auto / Pinned setups can map an original runtime's complete SHA256 to its matching backend DLL:
+
+```ini
+[Backends]
+; Replace the placeholder with the original runtime's complete SHA256.
+; <runtime-sha256>=backends\matching_backend.dll
 ```
 
-Relative `BuildDirectory` paths are resolved against the project root. Outputs under `dist` remain grouped by configuration. Use a new build directory after changing generators or moving the source tree. Ninja Multi-Config requires an MSVC x64 environment and Ninja on PATH.
+A mapping does not automatically adapt an unknown runtime; the backend must support that exact file. Explicit PTX / Cubin selection also requires an external backend that supports the kernel-selection extension. Unsupported selection logs `kernel_selection_unsupported` and rejects installation. Auto selection remains compatible with the original ABI 1 backend interface.
 
-The [fresh-machine setup and build guide](docs/DEVELOPMENT.md) (Chinese) covers installation from scratch. The existing development workspace also has a prepared toolchain under `out/tools`, used by `scripts/build-local.ps1`; that toolchain is not included in the source package, and the helper does not install missing tools.
+## Configuration examples
 
-## PTX and cubin selection
+Replace the keys in the existing INI sections and restart the game. Keep other settings at their defaults.
 
-On a physical SM86 GPU such as the RTX 3080 Ti, `KernelImage=Auto` selects the precompiled SM86 cubin. To use the driver's PTX JIT path on the same GPU, set:
+### Use PTX JIT on the RTX 3080 Ti
 
 ```ini
 [Compatibility]
@@ -108,75 +152,54 @@ ForceSM86Route=0
 SimulateAmpere=0
 ```
 
-`KernelImage=Cubin` explicitly requires physical SM86 when the SM86 route is active. `KernelImage` chooses the kernel format; it does not independently force routing on another GPU architecture. Keep both compatibility switches at `0` on the RTX 3080 Ti. Restart the game after changing these settings.
+Set KernelImage back to Auto, or explicitly to Cubin, to restore the precompiled path. Architecture simulation is not required.
 
-## Optional GPU validation
+### Enable generated-frame markers
 
-Prepare Python 3.10 or later, NumPy, and an NVIDIA GPU with its driver, then run:
-
-```powershell
-.\build.cmd -Validate -Python "C:\path\to\python.exe"
-.\build.cmd -Validate -RequireSM86 -Python "C:\path\to\python.exe"
+```ini
+[Debug]
+MarkGeneratedFrames=1
+MarkerX=8
+MarkerY=8
+MarkerScale=2
 ```
 
-`-RequireSM86` requires the physical CUDA device matched to the D3D12 adapter to be SM86. It must be used with `-Validate`.
+The denominator reflects the game's actual request. If the configured maximum is 3 but the game requests one generated frame, the marker reads `FG 1/1`.
 
-The validator discovers the driver's `_nvngx.dll` and uses a different `nvngx_dlssg.dll` beside it for cross-version checks. If discovery fails or multiple driver installations are present, specify the files explicitly:
+## Confirm that the configuration is active
 
-```powershell
-.\build.cmd -Validate -RequireSM86 -Python "C:\path\to\python.exe" `
-  -NgxRuntime "C:\path\to\_nvngx.dll" `
-  -ComparisonDll "C:\path\to\another-version\nvngx_dlssg.dll"
-```
+Check the Level 2 or Level 3 logs:
 
-The comparison DLL must differ from the embedded `assets/runtime/nvngx_dlssg.dll`. Each run writes a new `out/validation/<configuration>-<timestamp>/` directory. Reports retain numerical differences; `stages/` contains each stage's command, stdout, stderr, and exit status.
+| Event or field | Meaning |
+|---|---|
+| Loader `configuration` | INI path, runtime mode, and requested kernel format. `requested_max` is the INI value before the backend limit; see `mfg_capability` for the advertised result. |
+| Backend `install` | Preparation for installation. `actual_sm` identifies physical architecture; `active` is the planned SM86 route state; `image` is the selected format. This event occurs before hook installation finishes. |
+| Loader `backend_install` | `status=0` means backend installation succeeded. Also check `install.active` to confirm that the SM86 route was enabled. |
+| `image=ptx_sm86` / `cubin_sm86` | Selected SM86 PTX / cubin format. |
+| `image=original` | Uses original runtime kernels without replacement. |
+| `mfg_capability` | Original capability and the advertised maximum generated-frame count. |
+| Level 3 `kernel_create` | Format and status of each kernel creation. |
+| Level 3 `evaluate` / `frame_marker` | Actual generated-frame count, evaluation result, and marker index. |
 
-The RTX 3080 Ti run completed 18 compute scenarios and a marker scenario with both architecture simulation switches disabled. All 176 comparisons between Auto, PTX, and Cubin outputs on the same GPU were bit-exact. Five basic checks, 17 capability cases, 19 loading cases, 10 kernel-configuration cases, and four marker texture formats passed.
+Confirm both `install.active=true` and the corresponding `backend_install.status=0`. A selected image format alone does not prove that kernels were created or executed; inspect the subsequent `kernel_create` and `evaluate` results.
 
-Both games selected SM86 cubin and executed 2X / 4X. Wukong also covered disabling frame generation and enabling it again. Neither session recorded failed SM86 routed kernel creation or failed kernel launches. Game PTX and 3X were not tested; their execution coverage comes from the offline matrix.
+Invalid numbers, enumeration values, or combinations fail configuration parsing and can log `configuration_error`. Backend compatibility failures can appear as `install_failed`. Restore the default INI and restart to check again.
 
-Comparisons against the fixed references still show small differences in some generated frames, with a maximum observed channel difference of **3/255**. The exact numerical cause has not been located. The raw strict result remains `passed=false`; this release accepts that known issue based on the recorded RTX 3080 Ti checks and gameplay. The manifest records release acceptance separately from strict validation. **The normal `-Validate` workflow still stops installation and packaging when strict validation fails.**
+## Tested release and known limits
 
-The tested `version.dll` SHA256 is:
+The tested platform is Windows x64 / D3D12 with an RTX 3080 Ti and driver 591.86. Offline Auto, PTX, and Cubin execution and output agreement on the same GPU were checked. Both games executed Auto/cubin at 2X and 4X; Wukong also covered disabling and re-enabling frame generation.
 
-```text
-03d445237d519ac48cd9226278a0f07aecd7ac597697697eb64404e1d51b3c5a
-```
+| User-reported gameplay | Off | 2X | 4X |
+|---|---:|---:|---:|
+| Black Myth: Wukong | 50 FPS | 80 FPS | 150 FPS |
+| Cyberpunk 2077, path tracing | 35 FPS | 60 FPS | 100 FPS |
 
-D3D12 debug-layer validation requires Windows Graphics Tools. It was not enabled for the recorded run; `d3d12_debug_errors=null` means it was not checked. Frame pacing, latency, temporal artifacts, and long-duration stability have not been measured separately.
+These approximate manual observations apply to the DLL identified in the [test record](docs/VALIDATION.md) (Chinese). The tester described the experience as relatively stable. Standardized frame-time, latency, and long-duration stability measurements have not been performed.
 
-## Project layout
+Small differences against fixed reference images remain a known issue: the maximum observed channel difference was 3/255. Strict validation remains `passed=false`; release acceptance is recorded separately in the manifest. New binaries require their own validation, and other hardware is not covered by these results.
 
-```text
-dlssg/
-  build.cmd / build.ps1   Toolchain discovery, build, checks, and packaging
-  CMakeLists.txt          Standalone CMake project
-  src/
-    loader.cpp           Proxy exports, DLSSG loading hooks, and INI handling
-    bundle.cpp           Embedded payload extraction, caching, and hash checks
-    marker.cpp           Optional generated-frame markers
-    backends/310_1/      Backend matched to the embedded runtime
-    generated/           Generated proxy exports and GPU resource indices
-  assets/
-    runtime/             Original runtime, models, host graph, and processing
-    kernels/             72 groups of SM86 cubin/PTX resources
-  config/                Default INI
-  third_party/           Detours, JSON, DirectX, and NGX headers/libraries
-  cmake/                 Resource embedding, check setup, and packaging
-  scripts/               GPU validation, export generation, and local build helper
-  tests/
-    native/              Native checks and D3D12/NGX tests
-    python/              Capability, loading, and image comparisons
-    reference/           Bundled reference inputs and outputs
-  docs/                  Installation, architecture, and validation documentation
-  out/                   Tooling, build caches, and validation output
-  dist/                  Deployment artifacts
-```
+## Uninstallation
 
-Models and GPU resources are fixed build inputs. Updating the embedded DLSSG version requires matching backend addresses, structures, kernels, and runtime hash constraints, followed by new validation. Replacing only `assets/runtime/nvngx_dlssg.dll` is rejected by the build checks.
+Exit the game and remove the proxy DLL and INI added by this package. The cache can remain for other installations. Use only one proxy entry point; existing mods with the same filename require resolving the conflict. Arbitrary proxy chaining is not implemented.
 
-Implementation details are in the [architecture guide](docs/ARCHITECTURE.md) (Chinese). License terms are in [LICENSE.md](LICENSE.md), with third-party attribution in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
-
-## AMD research status
-
-The RX 7900 XTX / RDNA 4 WMMA prototype and plan remain in the development workspace under `experimental/amd_wmma`. Development is paused. The current release does not support AMD GPUs, and this independent research is not part of the SM86 source distribution.
+See `LICENSE.md` and `THIRD_PARTY_NOTICES.txt` for license terms and third-party attribution.
