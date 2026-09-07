@@ -1,4 +1,5 @@
-# DLSSG Standalone
+# DLSSG For RTX30XX GPU
+
 
 [简体中文](README.md) | English
 
