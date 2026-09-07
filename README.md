@@ -1,4 +1,4 @@
-# DLSSG 独立项目
+# DLSSG For RTX30XX GPU
 
 简体中文 | [English](README.en.md)
 
