@@ -1,53 +1,150 @@
-# DLSSG For RTX30XX GPU
+# DLSSG SM86 融合版
 
 简体中文 | [English](README.en.md)
 
-Windows x64 / D3D12 的 DLSSG SM86 融合版。代理 DLL 内嵌配套的原版 DLSSG 310.1、模型和计算管线，以及 SM86 后端；默认 `Mode=Bundled`。游戏自带的 DLSSG 版本不参与计算后端匹配。
+当前 **Release（2026-09-07）** 为首个 milestone，游戏实测、验证范围及已知项见 [测试记录](docs/VALIDATION.md)。
 
-本目录包含构建所需的源码、第三方头文件/库、运行库和 GPU 资源，可以整体复制到其他位置。构建不依赖外层研究目录、游戏安装目录或旧 CMake 缓存。
+**将 `version.dll + dlssg_sm86.ini` 放到游戏实际渲染 EXE 旁，照常启动。** 运行时无需 Python 或 PowerShell 启动器。
 
-## 首个 milestone
+代理 DLL 内嵌配套的原版 DLSSG 310.1（含模型和管线）及其 SM86 后端，默认 `Mode=Bundled`。游戏请求不同版本的 DLSSG 时，统一加载这套内置实现。首次运行将配套文件释放到 `%LOCALAPPDATA%\DlssgSm86\bundles\<bundle-id>`，校验后加载；以后复用缓存，损坏时自动恢复。
 
-当前 **Release（2026-09-07）** 是首个 milestone，基于 RTX 3080 Ti / SM86、驱动 591.86 的离线检查和游戏实测。用户反馈当前游玩相对稳定。
+## INI 放在哪里、何时生效
 
-| 用户手动实测 | 关闭插帧 | 2X | 4X |
-|---|---:|---:|---:|
-| 黑神话：悟空 | 50 FPS | 80 FPS | 150 FPS |
-| 赛博朋克 2077，路径追踪 | 35 FPS | 60 FPS | 100 FPS |
+配置文件固定命名为 `dlssg_sm86.ini`，放在当前使用的代理 `version.dll` 或 `winmm.dll` 旁。**修改后完全退出并重新启动游戏**，当前没有热重载。
 
-发布目录为 `dist/Release/`，部署包为 `dist/dlssg-release-x64.zip`，源码包为 `dist/dlssg-source.zip`，均附 SHA256。部署包使用当前实测 DLL，INI 默认关闭帧标记。两款游戏按统一格式记录在 [测试文档](docs/VALIDATION.md) 中；原始 evidence、日志和截图仅保留在开发工区。
+- 布尔开关填写 `0` 或 `1`。以 `;` 开头的行为注释。
+- `Mode`、`KernelImage` 的值不区分大小写。
+- 日志目录、缓存目录和 DLL 路径可以填写绝对路径；相对路径以代理 DLL / INI 所在目录为基准。自定义路径不会展开 `%LOCALAPPDATA%`、`%TEMP%` 等环境变量，请填写实际路径；使用系统默认缓存目录时将 CacheDirectory 留空。
+- 以下“默认值”指随包 INI 中的设置。常规安装保留 `Mode=Bundled` 和两个兼容性开关为 `0`。
+- 使用新选项时同步更新代理 DLL 和 INI，确保程序支持相应设置。
 
-## 一键构建
+## 完整默认配置
 
-全新 Windows 机器的安装与构建流程见 [开发环境搭建与构建](docs/DEVELOPMENT.md)。
+```ini
+[General]
+Enabled=1
 
-安装 Visual Studio 的“使用 C++ 的桌面开发”、Windows SDK 和 C++ CMake 工具，然后在本目录执行：
+[FrameGeneration]
+MaxGeneratedFrames=3
 
-```powershell
-.\build.cmd
+[Logging]
+Level=2
+File=1
+DebugOutput=0
+EvaluateEvery=120
+Directory=dlssg_sm86\logs
+
+[Debug]
+MarkGeneratedFrames=0
+MarkerX=8
+MarkerY=8
+MarkerScale=2
+
+[Compatibility]
+KernelImage=Auto
+ForceSM86Route=0
+SimulateAmpere=0
+
+[Runtime]
+Mode=Bundled
+CacheDirectory=
+Path=
+
+[Backends]
 ```
 
-也可以直接运行 `build.ps1`。脚本自动发现 Visual Studio、配套 CMake 和 MSVC x64 工具链，依次完成编译、5 项基础检查、安装到产物目录及 ZIP 打包。RTX 3080 Ti 实测构建使用 MSVC 19.44、Windows SDK 10.0.26100.0 和 Ninja Multi-Config。基础检查包含无需 GPU 的内核选择规则测试。
+### [General]：总开关
 
-默认构建无需 Python、CUDA Toolkit 或 GPU 推理环境。内核使用 `assets/kernels` 中已有的 SM86 cubin/PTX；此构建脚本不重新生成内核。
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `Enabled` | `1` | `1` 启用 DLSSG 重定向、适配、能力上报和可选标记；`0` 保留游戏原始 DLSSG 加载行为。代理仍转发系统 DLL 的原有导出。 |
 
-常规构建输出路径如下：
+### [FrameGeneration]：上报插帧数量
 
-| 输出 | 内容 |
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `MaxGeneratedFrames` | `3` | 上报的最大“额外生成帧”数量。`0` 保留运行库原有上报；`1` 最多 2×；`2` 最多 3×；`3` 最多 4×。 |
+
+例如 `MaxGeneratedFrames=3` 表示每个真实帧间隔最多额外生成 3 帧。**实际生成数量由游戏请求决定**，该设置不会单独增加游戏菜单选项，也不会强制呈现 4×。
+
+当前后端上限为 3；解析器接受的 4–16 会限制到 3，超过 16 或非法数字会导致配置读取失败。正常使用填写 0–3 即可。
+
+### [Compatibility]：选择 PTX / cubin 与验证模式
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `KernelImage` | `Auto` | 内核加载格式，支持 `Auto / PTX / Cubin`，具体行为见下表。缺少此项也使用 Auto。 |
+| `ForceSM86Route` | `0` | `0` 自动识别，真实 SM86 启用适配路径；`1` 允许其他 GPU 强制使用 SM86 后端进行验证，低于 SM86 的 GPU 仍会被拒绝。 |
+| `SimulateAmpere` | `0` | `1` 为验证调整架构报告；必须同时设置 `ForceSM86Route=1`。它不会改变物理 GPU。 |
+
+| KernelImage 值 | 路由启用后的行为 |
 |---|---|
-| `dist/Release/version.dll` | 主代理，内嵌运行库和后端 |
-| `dist/Release/alternatives/winmm.dll` | 备用代理入口 |
-| `dist/Release/dlssg_sm86.ini` | 用户配置 |
-| `dist/Release/manifest.json` | 文件哈希、内嵌配对信息和检查结果 |
-| `dist/Release/docs/VALIDATION.md` | 游戏实测、执行检查和已知项 |
-| `dist/dlssg-release-x64.zip` | 部署包 |
-| `dist/dlssg-release-x64.zip.sha256` | 部署包校验值 |
+| `Auto` | 真实 SM86 使用预编译的 SM86 cubin；其他 GPU 使用 SM86 PTX。 |
+| `PTX` | 总是使用 SM86 PTX，由驱动 JIT 编译成本机机器码；3080 Ti 也适用。 |
+| `Cubin` | 使用预编译的 SM86 cubin，要求真实 SM86。其他架构会拒绝安装该适配路径；默认 Bundled 模式下会尝试回退原始加载请求。 |
 
-默认构建只记录基础检查通过，GPU 状态为 `performed: false`。使用下面的 `-Validate` 才会执行 GPU 比较并把结果与当前 DLL 哈希绑定；历史验证不会自动算作新二进制的验证。
+**KernelImage 只选择内核格式，不单独开启路由。** RTX 3080 Ti 会自动识别为 SM86，使用 Auto、PTX 或 Cubin 时两个兼容性开关均保留 0。未启用 SM86 路由的设备仍使用运行库原生内核。
 
-## 选择 PTX / cubin
+该设置不调整模型权重、FP16 精度模式或上报帧数。PTX 需要驱动支持相应的 PTX 版本，首次加载可能发生 JIT 编译。
 
-在 `dlssg_sm86.ini` 中设置：
+### [Logging]：日志输出
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `Level` | `2` | `0` 关闭日志；`1` 错误；`2` 增加配置、加载和能力信息；`3` 再增加内核创建、Evaluate 和标记信息。 |
+| `File` | `1` | `1` 写日志文件；`0` 关闭文件输出。仍受 Level 控制。 |
+| `DebugOutput` | `0` | `1` 同时通过 Windows 调试输出发送日志，可由调试器接收；不在游戏画面上显示。 |
+| `EvaluateEvery` | `120` | 正常 Evaluate / 标记日志的采样间隔，按 Evaluate 调用计数。`1` 记录每次；`0` 按 120 处理；最大 1,000,000。 |
+| `Directory` | `dlssg_sm86\logs` | 日志目录，可修改为其他非空的相对或绝对目录。 |
+
+日志文件名为 `loader_<PID>.jsonl` 和 `backend_<PID>.jsonl`。Level 3 下，前 12 次 Evaluate 会记录，后续正常调用按 `EvaluateEvery` 采样；失败事件仍按错误级别记录。多帧生成可能在一个真实帧间隔内调用多次 Evaluate，因此采样间隔不等于游戏帧数。
+
+Level 2 通常足够确认配置和内核选择。需要分析逐次调用时再开启 Level 3，它会产生更多日志。
+
+### [Debug]：生成帧标记
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `MarkGeneratedFrames` | `0` | `1` 在生成输出上绘制 `FG 1/3` 等实际序号标记；`0` 关闭。真实帧和 Reset 输出跳过。 |
+| `MarkerX` | `8` | 标记左上角的横坐标，单位为输出纹理像素，范围 0–65535。 |
+| `MarkerY` | `8` | 标记左上角的纵坐标，单位为输出纹理像素，范围 0–65535。 |
+| `MarkerScale` | `2` | 标记缩放倍率，范围 1–8。矩形大小为 `24×scale` 宽、`9×scale` 高，默认 48×18 像素。 |
+
+标记必须完整位于输出纹理内部；超出范围会绘制失败，日志中记录 `marker_failed`。标记会实际修改生成帧像素，因此做全图数值比较时关闭标记，或单独比较标记矩形之外的区域。
+
+### [Runtime]：运行库选择和缓存
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `Mode` | `Bundled` | 运行库来源，支持 `Bundled / Auto / Pinned`。这里的 Auto 与 KernelImage=Auto 是两个独立选项。 |
+| `CacheDirectory` | 空 | 空值使用 `%LOCALAPPDATA%\DlssgSm86\bundles`；非空时使用指定缓存根目录，程序在其下按 bundle ID 建立子目录。 |
+| `Path` | 空 | 仅 Pinned 使用，应明确填写目标原版 `nvngx_dlssg.dll` 的路径。Bundled 和 Auto 不使用此项。 |
+
+| Mode 值 | 行为 |
+|---|---|
+| `Bundled` | 使用代理内嵌的运行库和配套后端。普通安装使用这个模式，无须填写 Path 或 Backends。 |
+| `Auto` | 加载游戏请求的原运行库。内置已知哈希可自动配套后端；其他版本需另有匹配后端，否则保留原库行为。 |
+| `Pinned` | 尝试使用 Path 指定的原运行库，并要求有匹配后端。目标缺失或不满足选择条件时保留原始请求，详情见日志。 |
+
+Bundled 固定使用本包的 310.1 模型，不会自动采用游戏自带新 DLL 的模型改进。默认模式下，缓存释放、运行库加载或后端安装失败会记录 `runtime_selection_failed` 并尝试原始请求；回退成功不表示 SM86 路由已经生效。
+
+### [Backends]：高级外部后端映射
+
+默认留空，仅 Auto / Pinned 模式的外部运行库适配需要填写。键是目标原运行库文件的完整 SHA256，值是与它匹配的后端 DLL 路径：
+
+```ini
+[Backends]
+; 将占位符换成原运行库的完整 SHA256；此行为格式示例。
+; <runtime-sha256>=backends\matching_backend.dll
+```
+
+映射项不会自动适配未知 DLL，后端必须确实支持目标文件。显式选择 PTX / Cubin 时，外部后端还需支持内核选择扩展；旧后端不支持时会记录 `kernel_selection_unsupported` 并拒绝安装。Auto 内核选择仍兼容原 ABI 1 后端。
+
+## 常用配置示例
+
+下面是要修改的片段，在已有同名分节中替换对应键即可；其他参数保留完整默认配置。
+
+### 3080 Ti：使用 PTX JIT
 
 ```ini
 [Compatibility]
@@ -56,75 +153,46 @@ ForceSM86Route=0
 SimulateAmpere=0
 ```
 
-这会让 3080 Ti 等真实 SM86 显卡使用 PTX JIT。默认 `Auto` 在 SM86 上使用预编译 cubin；`Cubin` 显式要求使用 SM86 cubin。此项不单独强制开启其他架构的 SM86 路由，修改后重启游戏。完整行为和日志字段见 [安装说明](docs/INSTALL.md)。
+恢复预编译 cubin 可将 KernelImage 改回 Auto，或明确设为 Cubin。无需开启架构模拟。
 
-## 可选 GPU 验证
+### 开启生成帧标记
 
-准备 Python 3.10+、NumPy 和 NVIDIA GPU / 驱动环境后运行。RTX 3080 Ti 的实机检查覆盖 Auto、PTX、Cubin 执行及本机输出一致性；验证器另执行固定参考比较：
-
-```powershell
-.\build.cmd -Validate -Python "C:\path\to\python.exe"
-.\build.cmd -Validate -RequireSM86 -Python "C:\path\to\python.exe"
+```ini
+[Debug]
+MarkGeneratedFrames=1
+MarkerX=8
+MarkerY=8
+MarkerScale=2
 ```
 
-验证器自动查找驱动中的 `_nvngx.dll`，并使用同目录的另一版 `nvngx_dlssg.dll` 做跨版本对照。若当前驱动没有提供不同版本，或者存在多个驱动目录，可以显式指定：
+标记分母来自游戏实际请求数量。例如上限设为 3、游戏实际只请求 1 张时，标记为 `FG 1/1`。
 
-```powershell
-.\build.cmd -Validate -Python "C:\path\to\python.exe" `
-  -NgxRuntime "C:\path\to\_nvngx.dll" `
-  -ComparisonDll "C:\path\to\another-version\nvngx_dlssg.dll"
-```
+## 如何确认配置生效
 
-`-RequireSM86` 要求 D3D12 适配器匹配的真实 CUDA 设备为 SM86。结果保存在独立的 `out/validation/<配置>-<时间>/`，各阶段标准输出、错误输出和退出码保存在 `stages/`。验证涵盖能力上报、加载/缓存、图像一致性及四种纹理格式的生成帧标记；数值差异保留在报告中，严格检查失败时停止安装到 dist 和打包。D3D12 debug layer 检查需要 Windows Graphics Tools；未启用时报告明确记为未检查。
+在 Level 2 或 3 的日志中检查：
 
-2026-09-07 已在 RTX 3080 Ti / SM86、驱动 591.86 上完成离线验证，两个模拟开关均为 0：18 个计算场景及标记场景执行成功，Auto/PTX/Cubin 的 176 张同机输出比较全部位一致。17 项能力、19 项加载、10 项内核配置和 4 种纹理格式检查通过；本机未启用 D3D12 debug layer。结果见 [测试记录](docs/VALIDATION.md)。
+| 事件 / 字段 | 含义 |
+|---|---|
+| loader：`configuration` | 本次读取的 INI、运行库模式与内核格式请求。`requested_max` 是 INI 请求值，尚未应用后端上限；实际上报值看 `mfg_capability`。 |
+| backend：`install` | 安装准备阶段记录。`actual_sm` 是物理架构；`active` 是本次计划启用的 SM86 路由状态；`kernel_image_requested` 是请求值，`image` 是选定格式。该事件早于钩子安装完成。 |
+| loader：`backend_install` | `status=0` 表示后端安装调用成功；还需结合 `install.active` 判断是否启用了 SM86 内核替换。非零状态表示安装失败。 |
+| `image=ptx_sm86` | 已选择 SM86 PTX。 |
+| `image=cubin_sm86` | 已选择 SM86 cubin。 |
+| `image=original` | 本次没有启用内核替换，使用运行库原生内核。 |
+| `mfg_capability` | 运行库原上限与本次上报的最大生成帧数。 |
+| Level 3：`kernel_create` | 每次内核创建实际使用的格式与返回状态。 |
+| Level 3：`evaluate` / `frame_marker` | 实际生成数量、调用结果或标记序号。 |
 
-两款游戏使用同一版代理，Auto 选择 SM86 cubin，日志均记录了 2X / 4X，路由创建和内核启动失败计数为 0。悟空还覆盖了关闭后重新开启；赛博朋克用户实测条件为路径追踪。上表帧率是用户手动观察值，尚无规范化性能或长期稳定性测量。两款游戏的条件、帧率和执行结果统一见 [测试记录](docs/VALIDATION.md)。
+确认路由安装成功时，同时检查 `install.active=true` 和对应的 `backend_install.status=0`。仅出现 `image=ptx_sm86` / `cubin_sm86` 不能证明内核已经创建或执行；实际推理还需检查后续 `kernel_create`、`evaluate` 及其结果。
 
-以上结论对应当前 Release 中的实测代理，SHA256 为 `03d445237d519ac48cd9226278a0f07aecd7ac597697697eb64404e1d51b3c5a`。固定参考逐位比较仍未通过，原始 `passed=false` 保留；本次按用户要求接受该已知项，并在 manifest 中分别记录严格检查状态和发布接受状态。常规 `-Validate` 仍在严格比较失败时停止打包。
+非法数字、枚举值或组合会导致配置读取失败；日志开启时可见 `configuration_error`。SM86 cubin 与物理 GPU 不匹配等后端错误可在 `install_failed` 中查看。恢复默认 INI 后重启可重新验证。
 
-## 目录
+## 安装注意与卸载
 
-```text
-dlssg/
-  build.cmd / build.ps1      自动发现工具链、构建、检查和打包
-  CMakeLists.txt             独立 CMake 入口
-  src/
-    loader.cpp              代理导出转发、DLSSG 加载拦截、INI
-    bundle.cpp              内嵌配对释放、缓存和哈希校验
-    marker.cpp              生成帧标记
-    backends/310_1/          与内置运行库匹配的 SM86 后端
-    generated/              已生成的代理导出和 GPU 资源索引
-  assets/
-    runtime/                原版运行库，包含模型/host graph/前后处理
-    kernels/                72 组 SM86 cubin/PTX 资源
-  config/                   默认 INI
-  third_party/              Detours、JSON、DirectX、NGX 头文件/库
-  cmake/                    资源嵌入、基础检查准备、打包
-  scripts/                  GPU 验证、代理导出、本地工具链入口
-  tests/
-    native/                 原生检查和 D3D12/NGX 测试
-    python/                 能力、加载和图像比较
-    reference/              随项目携带的原版输出参考
-  docs/                     安装、架构、验证记录与摘要证据
-  out/                      构建缓存、测试日志和捕获（不纳入源码）
-  dist/                     部署产物（不纳入源码）
-```
+游戏不导入 VERSION.dll 时，可改用 `alternatives/winmm.dll`，它同样内嵌完整运行库。只启用一种代理；已有同名 mod 时需要处理入口冲突，当前没有实现任意代理链。
 
-模型和 GPU 资源作为固定输入参与构建。要更换内置 DLSSG，需同时适配后端的内部地址/结构和内核，再更新运行库哈希约束并重新验证；仅替换 `assets/runtime/nvngx_dlssg.dll` 会被构建检查拒绝。
+目前针对 Windows x64 / D3D12。M1 已在 RTX 3080 Ti / 驱动 591.86 上完成 Auto、PTX、Cubin 离线执行和同机输出一致性检查，同一代理在悟空和赛博朋克中实际执行 Auto/cubin 的 2X、4X；悟空还覆盖关闭后重新开启。
 
-## 构建选项
+用户手动实测关闭 / 2X / 4X：悟空约 50 / 80 / 150 FPS，赛博朋克路径追踪约 35 / 60 / 100 FPS，并反馈相对稳定。详见 [验证记录](docs/VALIDATION.md)。结果绑定 M1 的 DLL 哈希，其他产物以自身 `manifest.json` 的状态为准。规范化帧时间、延迟和长期稳定性尚未测量；固定参考的数值差异作为 M1 已知项保留。
 
-```powershell
-.\build.cmd -BuildDirectory "out\custom build"
-.\build.cmd -Configuration RelWithDebInfo
-.\build.cmd -CMake "C:\path\to\cmake.exe" -Generator "Visual Studio 17 2022"
-```
-
-相对 `BuildDirectory` 以本项目为基准，脚本可以从其他工作目录调用。CMake 支持 Visual Studio 或已配置 MSVC 环境的 Ninja Multi-Config，支持 Release、Debug 和 RelWithDebInfo；产物分配置存放。M1 的 Release 通过 5 项基础检查。`out/` 和 `dist/` 已写入本目录的 `.gitignore`。当前机器保留了 `out/tools` 中已安装的 MSVC、SDK、Python / NumPy、CMake 和 Ninja，可用 `scripts/build-local.ps1` 构建，或加 `-Validate` 运行物理 SM86 验证。
-
-安装使用见 [安装说明](docs/INSTALL.md)，实现分工见 [架构说明](docs/ARCHITECTURE.md)，当前实测证据见 [验证记录](docs/VALIDATION.md)。构建脚本仅生成部署包，游戏运行使用 DLL + INI。
-
-## AMD 移植研究（暂停）
-
-RX 7900 XTX / RDNA 4 的 WMMA 原型和计划保留在开发工区的 `experimental/amd_wmma`。实现已暂停，当前发布 DLL 尚不支持 AMD；这部分独立研究不包含在 SM86 源码部署快照中。
+卸载时退出游戏，移走本包添加的代理和 INI。缓存可保留供其他安装使用。原 NVIDIA DLL 及内核资源的归属见 `THIRD_PARTY_NOTICES.txt`。
