@@ -3,7 +3,6 @@ Its a kinda pointless fork (its more of a guide, there isn't really a true patch
 ## Dependencies
 - Any RTX 30x series (20x series hasn't been well tested in general)
 - Open-Nvidia drivers installed, this has been tested on ```NVIDIA-SMI 610.57.04 KMD Version: 610.57.04 CUDA UMD Version: 13.3```
-- Native CUDA libs installed, this is basically a must for this.
 - NVLibs installed into the prefix, or enabled through a Proton fork (This whole thing has been tested on proton-cachyos-11.0-20260703-slr, also will be using this method)
 - You NEED a real Windows 10/11 ```version.dll``` file, the proxy will NOT work unless you replace your WINE's version.dll. This repo will contain one, you can use your own file, or extract one from an ISO or DLL website.
 - Not all games has been tested, some may reports failures, some may work weird, some not. Its something you have to test for itself and report it. In my case I tested it on Far Far West and WuKong benchmark, both worked well.
